@@ -1,0 +1,171 @@
+name: 自动编译上游新版本
+
+on:
+  schedule:
+    # 北京时间4:00
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    strategy:
+      matrix:
+        include:
+          - name: amd64
+            goarch: amd64
+            goarm: ""
+            cc: gcc
+          - name: arm64
+            goarch: arm64
+            goarm: ""
+            cc: aarch64-linux-gnu-gcc
+          - name: armv7
+            goarch: arm
+            goarm: "7"
+            cc: arm-linux-gnueabihf-gcc
+          - name: armv6
+            goarch: arm
+            goarm: "6"
+            cc: arm-linux-gnueabihf-gcc
+    outputs:
+      has_new_version: ${{ steps.check.outputs.has_new_version }}
+      latest_version: ${{ steps.upstream.outputs.latest }}
+      version_clean: ${{ steps.upstream.outputs.version_clean }}
+    steps:
+      - name: 获取上游最新 Release 版本
+        id: upstream
+        env:
+          REPO: containers/skopeo
+          GH_TOKEN: ${{ secrets.HUB_TOKEN }}
+        run: |
+          LATEST=$(gh api repos/$REPO/releases/latest --jq .tag_name)
+          echo "latest=${LATEST}" >> $GITHUB_OUTPUT
+          echo "上游最新版本: ${LATEST}"
+          VERSION_CLEAN="${LATEST#v}"
+          echo "version_clean=${VERSION_CLEAN}" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+
+      - name: 恢复上次编译的版本缓存
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .last-version
+          key: upstream-version-${{ github.run_id }}
+          restore-keys: |
+            upstream-version-
+
+      - name: 读取已编译版本并判断是否需要编译
+        id: check
+        run: |
+          if [ -f .last-version ]; then
+            CACHED_VERSION=$(cat .last-version)
+            echo "cached_version=${CACHED_VERSION}" >> $GITHUB_OUTPUT
+          else
+            CACHED_VERSION="none"
+            echo "cached_version=none" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "$CACHED_VERSION" != "${{ steps.upstream.outputs.latest }}" ]; then
+            echo "has_new_version=true" >> $GITHUB_OUTPUT
+            echo "发现新版本: ${{ steps.upstream.outputs.latest }} (缓存版本: ${CACHED_VERSION})"
+          else
+            echo "has_new_version=false" >> $GITHUB_OUTPUT
+            echo "无新版本，跳过编译 (当前版本: ${CACHED_VERSION})"
+          fi
+
+      - name: 安装交叉编译工具链
+        if: steps.check.outputs.has_new_version == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget
+
+      - name: 编译（仅当版本更新时）
+        if: steps.check.outputs.has_new_version == 'true'
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+          CC: ${{ matrix.cc }}
+        run: |
+          echo "发现新版本 ${{ steps.upstream.outputs.latest }}，开始编译架构 ${{ matrix.name }}..."
+          
+          # 克隆代码
+          git clone --depth 1 --branch ${{ steps.upstream.outputs.latest }} \
+            https://github.com/${{ steps.upstream.outputs.repo }}.git source
+          mkdir -p output
+          
+          # 编译
+          cd source
+          go build -o output/skopeo-${{ matrix.name }} ./cmd/skopeo
+          
+          # 保存版本信息
+          echo "${{ steps.upstream.outputs.latest }}" > .last-version
+
+      - name: 上传产物作为 Artifact
+        if: steps.check.outputs.has_new_version == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skopeo-${{ matrix.name }}-${{ steps.upstream.outputs.latest }}
+          path: output/skopeo-${{ matrix.name }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: needs.build.outputs.has_new_version == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有编译产物
+        uses: actions/download-artifact@v4
+      - name: 获取版本信息
+        id: version
+        run: |          
+            echo "version=${{ needs.build.outputs.latest_version }}" >> $GITHUB_OUTPUT          
+      - name: 检查 Release 是否已存在
+        id: check_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${{ steps.version.outputs.version }}"
+          echo "检查 tag: $TAG_NAME 是否存在..."
+          
+          if gh release view "$TAG_NAME" &>/dev/null; then
+            echo "release_exists=true" >> $GITHUB_OUTPUT
+            echo "Release $TAG_NAME 已存在，跳过创建"
+          else
+            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "Release $TAG_NAME 不存在，将创建"
+          fi
+      - name: 获取编译时间
+        id: build_time
+        run: echo "compile_time=$(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+      - name: 创建 Release 并上传所有产物
+        if: steps.check_release.outputs.release_exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            🤖 自动编译版本: ${{ steps.version.outputs.version }}
+            
+            ## 📦 包含架构
+            - amd64 (x86_64)
+            - arm64 (ARM64)
+            - armv7 (ARM 32-bit v7)
+            - armv6 (ARM 32-bit v6)
+            
+            ## ⏰ 编译时间
+            ${{ steps.build_time.outputs.compile_time }}
+
+          draft: false
+          prerelease: false
+          files: |
+            */skopeo-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
