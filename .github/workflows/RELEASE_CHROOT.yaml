@@ -81,7 +81,7 @@ jobs:
         if: steps.check.outputs.has_new_version == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget golang git-core libgpgme11-dev go-md2man skopeo
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget golang git-core libgpgme11-dev go-md2man
 
       - name: 编译（仅当版本更新时）
         if: steps.check.outputs.has_new_version == 'true'
@@ -128,7 +128,8 @@ jobs:
         uses: actions/download-artifact@v4
       - name: 获取版本信息
         id: version
-        run: |          
+        run: |
+            apt update && apt install skopeo -y
             echo "version=${{ needs.build.outputs.latest_version }}" >> $GITHUB_OUTPUT          
       - name: 检查 Release 是否已存在
         id: check_release
