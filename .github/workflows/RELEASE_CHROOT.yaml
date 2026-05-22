@@ -81,7 +81,7 @@ jobs:
         if: steps.check.outputs.has_new_version == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget gcc g++ make
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget
 
       - name: 编译（仅当版本更新时）
         if: steps.check.outputs.has_new_version == 'true'
@@ -89,7 +89,7 @@ jobs:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
           CC: ${{ matrix.cc }}
         run: |
           echo "发现新版本 ${{ steps.upstream.outputs.latest }}，开始编译架构 ${{ matrix.name }}..."
@@ -101,8 +101,7 @@ jobs:
           
           # 编译
           cd source
-          make binary-static
-          cp -a ./bin/skopeo ../output/skopeo-${{ matrix.name }}
+          go build -tags "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper" -o ../output/skopeo-${{ matrix.name }} ./cmd/skopeo
           
           # 保存版本信息
           echo "${{ steps.upstream.outputs.latest }}" > .last-version
