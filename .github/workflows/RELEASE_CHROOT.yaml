@@ -81,7 +81,7 @@ jobs:
         if: steps.check.outputs.has_new_version == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget golang git-core libgpgme11-dev go-md2man
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget golang git-core libgpgme11-dev go-md2man skopeo
 
       - name: 编译（仅当版本更新时）
         if: steps.check.outputs.has_new_version == 'true'
@@ -170,5 +170,6 @@ jobs:
           prerelease: false
           files: |
             */skopeo-*
+            /etc/containers/policy.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
