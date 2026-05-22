@@ -81,7 +81,7 @@ jobs:
         if: steps.check.outputs.has_new_version == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zip unzip wget golang git-core libgpgme11-dev go-md2man
 
       - name: 编译（仅当版本更新时）
         if: steps.check.outputs.has_new_version == 'true'
@@ -89,8 +89,9 @@ jobs:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: 0
           CC: ${{ matrix.cc }}
+          BUILDTAGS: containers_image_openpgp
         run: |
           echo "发现新版本 ${{ steps.upstream.outputs.latest }}，开始编译架构 ${{ matrix.name }}..."
           
@@ -101,7 +102,9 @@ jobs:
           
           # 编译
           cd source
-          go build -tags "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper" -o ../output/skopeo-${{ matrix.name }} ./cmd/skopeo
+          #go build -tags "containers_image_openpgp exclude_graphdriver_btrfs exclude_graphdriver_devicemapper" -o ../output/skopeo-${{ matrix.name }} ./cmd/skopeo
+          make BUILDTAGS=containers_image_openpgp GO_DYN_FLAGS=''
+          cp -a bin/skopeo ../output/skopeo-${{ matrix.name }}
           
           # 保存版本信息
           echo "${{ steps.upstream.outputs.latest }}" > .last-version
