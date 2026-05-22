@@ -101,7 +101,8 @@ jobs:
           
           # 编译
           cd source
-          go build -o output/skopeo-${{ matrix.name }} ./cmd/skopeo
+          make binary-static
+          cp -a ./bin/skopeo ../output/skopeo-${{ matrix.name }}
           
           # 保存版本信息
           echo "${{ steps.upstream.outputs.latest }}" > .last-version
